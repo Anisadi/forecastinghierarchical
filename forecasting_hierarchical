@@ -1,4 +1,4 @@
-#Forecasting Petroleum and others Oil Price
+#Forecasting Petroleum 
 
 # Load the packages
 library(fpp3)

@@ -1,8 +1,211 @@
-#Forecasting Petroleum 
+#Forecasting Petroleum and others Oil Price
 
 # Load the packages
 library(fpp3)
 library(GGally)
 
 # Read the CSV file into a data frame
-petroleum_data <- read.csv("petroleum_summary.csv")
+petroleum_data = read.csv("petroleum_summary.csv")
+
+#Check headline data
+head(petroleum_data)
+str(petroleum_data)
+
+#Convert date to datetime object
+petroleum_data$date = as.Date(petroleum_data$date, format = "%Y-%m-%d")
+str(petroleum_data)
+
+# Change the data into tibble
+petroleum_data_tsibble = petroleum_data |>
+    as_tsibble(index = date,
+               key = c(description))
+
+# Fill the gaps where price is null
+petroleum_data_filled = petroleum_data_tsibble  |>
+    fill_gaps() |>
+    mutate(price = ifelse(is.na(price), 0, price))
+
+#Check how it works the fill_gaps on the blank dataset 
+petroleum_data_filled |> filter(date == "2024-04-14")
+
+#Check tail of the data 
+petroleum_data_filled
+
+# Filter train until 29 march 2024 and test data 1 - 20 april 2024
+train_data = petroleum_data_filled |>
+    filter(date <= '2024-03-31') 
+
+test_data = petroleum_data_filled |>
+    filter(date > '2024-03-31') |>
+    filter(date <= '2024-04-20') 
+
+tail(train_data)
+head(test_data)
+
+#Exclude the aggregated data
+test_data = test_data |>
+            filter(!is_aggregated(description))
+
+# Create train hts data
+train_hts = train_data |>
+    aggregate_key(
+        description,
+        price = sum(price)
+        )
+tail(train_hts)
+
+# Create test hts data
+test_hts = test_data |>
+    aggregate_key(
+        description,
+        price = sum(price)
+        )
+tail(test_hts)
+
+
+# Create train hts data
+petroleum_data_hts = petroleum_data_filled |>
+    aggregate_key(
+        description,
+        price = sum(price)
+        )
+tail(petroleum_data_hts)
+
+# Create seasonal naive train model
+petroleum_train_fit_snaive = train_hts |>
+    model(snaive = SNAIVE(price))
+
+# Create seasonal naive forecast
+petroleum_train_fc_snaive = petroleum_train_fit_snaive |>
+    forecast(h = 20) 
+
+#Check snaive forecast train result 
+head(petroleum_train_fc_snaive)
+
+# Check seasonal naive accuracy
+petroleum_hts_snaive_compare = test_hts |>
+    inner_join(petroleum_train_fc_snaive, by = c("date","description")) |>
+    mutate(price = ifelse(is.na(price.x), 0, price.x)) |> 
+    mutate(error = ifelse(is.na(price.x) | price.x == 0, 0, sqrt((price - .mean)^2))) |>
+    mutate(per_error = ifelse(price == 0, NA, error / price))|>
+    mutate(accuracy = 1 - per_error)
+
+petroleum_hts_snaive_accuracy = petroleum_hts_snaive_compare |>
+    summarize(mean_accuracy = mean(accuracy))
+
+#Select date, description, price.x, .model, .mean,error, per_error, accuracy columns
+petroleum_hts_snaive_compare = petroleum_hts_snaive_compare |>
+                           select(date, description, price.x, .model, .mean,error, per_error, accuracy)
+
+#Check head data
+head(petroleum_hts_snaive_compare)
+
+# Create ets train model
+petroleum_train_fit_ets = train_hts |>
+    model(ets = ETS(price))
+
+# Create ets forecast
+petroleum_train_fc_ets = petroleum_train_fit_ets |>
+    forecast(h = 20) 
+head(petroleum_train_fc_ets)
+
+# Check ets accuracy
+petroleum_hts_ets_compare = test_hts |>
+    inner_join(petroleum_train_fc_ets, by = c("date","description")) |>
+    mutate(price = ifelse(is.na(price.x), 0, price.x)) |> 
+    mutate(error = ifelse(is.na(price.x) | price.x == 0, 0, sqrt((price - .mean)^2))) |>
+    mutate(per_error = ifelse(price == 0, NA, error / price))|>
+    mutate(accuracy = 1 - per_error)
+
+petroleum_hts_ets_accuracy = petroleum_hts_ets_compare |>
+    summarize(mean_accuracy = mean(accuracy))
+
+head(petroleum_hts_ets_compare)
+
+#Select date, description, price.x, .model, .mean,error, per_error, accuracy columns
+petroleum_hts_ets_compare = petroleum_hts_ets_compare |>
+                           select(date, description, price.x, .model, .mean,error, per_error, accuracy)
+
+head(petroleum_hts_ets_compare)
+
+# Create ARIMA train model
+petroleum_train_fit_arima = train_hts |>
+    model(ARIMA(price))
+
+# Create ARIMA forecast
+petroleum_fc_arima = petroleum_train_fit_arima|>
+    forecast(h = 20, new_data = test_hts) 
+head(petroleum_fc_arima)
+
+# Check arima accuracy
+petroleum_hts_arima_compare = test_hts |>
+    inner_join(petroleum_fc_arima, by = c("date","description")) |>
+    mutate(price = ifelse(is.na(price.x), 0, price.x)) |> 
+    mutate(error = ifelse(is.na(price.x) | price.x == 0, 0, sqrt((price - .mean)^2))) |>
+    mutate(per_error = ifelse(price == 0, NA, error / price))|>
+    mutate(accuracy = 1 - per_error)
+
+petroleum_hts_arima_accuracy = petroleum_hts_arima_compare |>
+    summarize(mean_accuracy = mean(accuracy))
+
+head(petroleum_hts_arima_compare)
+
+#Select date, description, price.x, .model, .mean,error, per_error, accuracy) 
+petroleum_hts_arima_compare = petroleum_hts_arima_compare |>
+                              select(date, description, price.x, .model, .mean,error, per_error, accuracy)
+
+# Extract the accuracy column 
+
+accuracy_ets = petroleum_hts_ets_compare$accuracy
+accuracy_snaive = petroleum_hts_snaive_compare$accuracy
+accuracy_arima = petroleum_hts_arima_compare$accuracy
+
+#Calculate each model accuracy
+avg_accuracy_ets = mean(accuracy_ets, na.rm=TRUE)
+avg_accuracy_ets
+avg_accuracy_snaive = mean(accuracy_snaive, na.rm=TRUE)
+avg_accuracy_snaive
+avg_accuracy_arima = mean(accuracy_arima, na.rm=TRUE)
+avg_accuracy_arima
+
+#Since ARIMA got the best accuracy, we continue to forecast 30 days ahead with ARIMA model
+
+#Forecast out for the next 30 Days / full April 2024
+# Create arima train model
+petroleum_all_ets = petroleum_data_hts |>
+    model(ARIMA(price))
+
+#Check head data
+head(petroleum_all_fc_arima)
+
+#Get the data and rename .mean to be forecast_value
+petroleum_all_fc_arima = petroleum_all_fc_arima|>
+                         filter(!is_aggregated(description)) |>
+                         mutate(forecast_value =.mean) 
+
+head(petroleum_all_fc_arima)
+
+petroleum_all_fc_arima = as.data.frame(petroleum_all_fc_arima) 
+
+#Select only date, description, forecast_value
+petroleum_all_fc_arima = petroleum_all_fc_arima %>%
+                         select(date, description,forecast_value)
+
+tail(petroleum_all_fc_arima)
+
+#Export Forecast Result
+write.csv(petroleum_all_fc_arima, "petroleum_all_fc_arima.csv", row.names = FALSE)
+
+##Export accuracy details 
+petroleum_hts_arima_compare = as.data.frame(petroleum_hts_arima_compare)
+head(petroleum_hts_arima_compare)
+
+petroleum_hts_arima_compare_001 = petroleum_hts_arima_compare %>%
+                                  rename(price=price.x) %>%
+                                  rename(forecast_value=.mean) %>%
+                                  select(date, description, price,forecast_value, error, per_error, accuracy)
+head(petroleum_hts_arima_compare_001)
+
+write.csv(petroleum_hts_arima_compare_001, "petroleum_hts_arima_compare_001.csv", row.names = FALSE)
+
+

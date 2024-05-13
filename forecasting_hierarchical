@@ -1,0 +1,8 @@
+#Forecasting Petroleum and others Oil Price
+
+# Load the packages
+library(fpp3)
+library(GGally)
+
+# Read the CSV file into a data frame
+petroleum_data <- read.csv("petroleum_summary.csv")
